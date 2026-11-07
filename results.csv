@@ -1,0 +1,21 @@
+experiment,isolation_level,verdict,detail
+Dirty read,READ UNCOMMITTED,no anomaly,"original=10 uncommitted=5 reader_saw=(5,) reader_wait=0.0s"
+Dirty read,READ COMMITTED,no anomaly,"original=10 uncommitted=5 reader_saw=(10,) reader_wait=0.0s"
+Dirty read,REPEATABLE READ,no anomaly,"original=10 uncommitted=5 reader_saw=(10,) reader_wait=0.0s"
+Dirty read,SERIALIZABLE,no anomaly,"original=10 uncommitted=5 reader_saw=(10,) reader_wait=2.0s"
+Non-repeatable read,READ UNCOMMITTED,ANOMALY,"read1=(20,) read2=(30,) writer_wait=0.0s"
+Non-repeatable read,READ COMMITTED,ANOMALY,"read1=(20,) read2=(30,) writer_wait=0.0s"
+Non-repeatable read,REPEATABLE READ,no anomaly,"read1=(20,) read2=(20,) writer_wait=0.0s"
+Non-repeatable read,SERIALIZABLE,no anomaly,"read1=(20,) read2=(20,) writer_wait=2.0s"
+Phantom read,READ UNCOMMITTED,ANOMALY,"count1=3 count2=4 audited_rows=(4,) writer_wait=0.0s"
+Phantom read,READ COMMITTED,ANOMALY,"count1=3 count2=4 audited_rows=(4,) writer_wait=0.0s"
+Phantom read,REPEATABLE READ,ANOMALY,"count1=3 count2=3 audited_rows=(4,) writer_wait=0.0s"
+Phantom read,SERIALIZABLE,ANOMALY (errors: {'T2': '1213 (40001): Deadlock found when trying to get lock; try restarting transaction'}),"count1=3 count2=3 audited_rows=(3,) writer_wait=0.0s"
+NRR + SELECT..FOR SHARE,READ COMMITTED,no anomaly,"read1=(20,) read2=(20,) writer_wait=2.0s"
+NRR + SELECT..FOR UPDATE,READ COMMITTED,no anomaly,"read1=(20,) read2=(20,) writer_wait=2.0s"
+Phantom + range FOR UPDATE,READ COMMITTED,ANOMALY,"count1=3 count2=4 audited_rows=(4,) writer_wait=0.0s"
+Phantom + range FOR UPDATE,REPEATABLE READ,ANOMALY,"count1=3 count2=3 audited_rows=(3,) writer_wait=2.0s"
+LOCK TABLES READ (table lock),n/a,no anomaly,"count1=(3,) count2=(3,) unrelated_row_writer_wait=2.0s"
+"Row lock, unrelated row write",READ COMMITTED,no anomaly,unrelated_row_writer_wait=0.00s
+Benchmark,row-level lock,-,total=0.70s throughput=171.9 txn/s
+Benchmark,table-level lock,-,total=2.96s throughput=40.5 txn/s
