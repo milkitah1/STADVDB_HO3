@@ -45,23 +45,18 @@ def conn(level=None):
     return c
 
 
-def q(c, sql, fetch=None, params=None):
-    cur = c.cursor(buffered=True)
-
-    cur.execute(sql, params or ())
-
-    if fetch == "one":
-        result = cur.fetchone()
-    elif fetch == "all":
-        result = cur.fetchall()
-    elif cur.with_rows:
-        result = cur.fetchall()
-    else:
-        result = None
-
+def q(c, sql, fetch=None):
+    cur = c.cursor()
+    cur.execute(sql)
+    out = None
+    if cur.with_rows:                       # always drain SELECT results
+        rows = cur.fetchall()
+        if fetch == "one":
+            out = rows[0][0] if rows else None   # plain value, not (5,)
+        elif fetch == "all":
+            out = rows
     cur.close()
-    return result
-
+    return out
 
 def setup():
     c = mysql.connector.connect(**CFG)
