@@ -28,7 +28,7 @@ INSERT INTO film_inventory (inventory_id, film_id, store_id, stock, status) VALU
 USE sakila_sim;
 START TRANSACTION;
 UPDATE film_inventory SET stock = 5 WHERE inventory_id = 1;
-SELECT SLEEP(5); -- Holds uncommitted modification
+DO SLEEP(5); -- Holds uncommitted modification
 ROLLBACK;        -- Changes are discarded
 
 -- [SESSION 2 - Reader (Run during Session 1's SLEEP)]
@@ -46,7 +46,7 @@ USE sakila_sim;
 SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
 START TRANSACTION;
 SELECT inventory_id, stock FROM film_inventory WHERE inventory_id = 2; -- First Read: stock = 20
-SELECT SLEEP(5); -- Pause while Session 2 modifies data
+DO SLEEP(5); -- Pause while Session 2 modifies data
 SELECT inventory_id, stock FROM film_inventory WHERE inventory_id = 2; -- Second Read: stock = 30 (Changed!)
 COMMIT;
 
@@ -64,7 +64,7 @@ USE sakila_sim;
 SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
 START TRANSACTION;
 SELECT COUNT(*) AS initial_count FROM film_inventory WHERE store_id = 1; -- Initial count: 3
-SELECT SLEEP(5); -- Pause while Session 2 inserts new tuple
+DO SLEEP(5); -- Pause while Session 2 inserts new tuple
 SELECT COUNT(*) AS phantom_count FROM film_inventory WHERE store_id = 1; -- New count: 4 (Phantom appeared!)
 COMMIT;
 
@@ -84,7 +84,7 @@ USE sakila_sim;
 SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
 START TRANSACTION;
 SELECT stock FROM film_inventory WHERE inventory_id = 2 FOR SHARE; -- Acquires Shared (S) Lock
-SELECT SLEEP(5);
+DO SLEEP(5);
 SELECT stock FROM film_inventory WHERE inventory_id = 2;
 COMMIT;
 
