@@ -1,7 +1,6 @@
--- ADVANCED DATABASE SYSTEMS: CONCURRENCY & ISOLATION EXPERIMENTS
--- Table: film_inventory (Simplified Sakila inventory, InnoDB Engine)
+-- ADVANCED DATABASE SYSTEMS: CONCURRENCY, ISOLATION & LOCKING EXPERIMENTS
+-- Table: film_inventory (InnoDB Engine)
 
--- 0. SCHEMA SETUP & BASELINE DATA
 CREATE DATABASE IF NOT EXISTS sakila_sim;
 USE sakila_sim;
 
@@ -15,80 +14,114 @@ CREATE TABLE film_inventory (
     INDEX idx_store (store_id)
 ) ENGINE=InnoDB;
 
-INSERT INTO film_inventory (inventory_id, film_id, store_id, stock, status) VALUES
-(1, 101, 1, 10, 'available'),
-(2, 102, 1, 20, 'available'),
-(3, 103, 1, 30, 'available'),
-(4, 104, 2, 40, 'available'),
-(5, 105, 2, 50, 'available');
+-- Helper to reset baseline data between runs:
+-- TRUNCATE film_inventory;
+-- INSERT INTO film_inventory VALUES (1,101,1,10,'available'),(2,102,1,20,'available'),(3,103,1,30,'available'),(4,104,2,40,'available'),(5,105,2,50,'available');
 
--- 1. EXPERIMENT: DIRTY READ (READ UNCOMMITTED)
+-- ============================================================================
+-- PART 1: 12 BASELINE CASES (3 ANOMALIES x 4 ISOLATION LEVELS)
+-- Run Session 1 first, then execute Session 2 while Session 1 is in DO SLEEP.
+-- Test across each level:
+--   SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+--   SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
+--   SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+--   SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+-- ============================================================================
 
--- [SESSION 1 - Writer]
-USE sakila_sim;
+-- [ANOMALY 1: DIRTY READ TEMPLATE]
+-- Session 1 (Writer):
 START TRANSACTION;
 UPDATE film_inventory SET stock = 5 WHERE inventory_id = 1;
-DO SLEEP(5); -- Holds uncommitted modification
-ROLLBACK;        -- Changes are discarded
+DO SLEEP(5);
+ROLLBACK;
 
--- [SESSION 2 - Reader (Run during Session 1's SLEEP)]
-USE sakila_sim;
-SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+-- Session 2 (Reader):
+SET SESSION TRANSACTION ISOLATION LEVEL <LEVEL>;
 START TRANSACTION;
-SELECT inventory_id, stock FROM film_inventory WHERE inventory_id = 1;
+SELECT stock FROM film_inventory WHERE inventory_id = 1;
 COMMIT;
 
 
--- 2. EXPERIMENT: NON-REPEATABLE READ (READ COMMITTED)
-
--- [SESSION 1 - Reader]
-USE sakila_sim;
-SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
+-- [ANOMALY 2: NON-REPEATABLE READ TEMPLATE]
+-- Session 1 (Reader):
+SET SESSION TRANSACTION ISOLATION LEVEL <LEVEL>;
 START TRANSACTION;
-SELECT inventory_id, stock FROM film_inventory WHERE inventory_id = 2; -- First Read: stock = 20
-DO SLEEP(5); -- Pause while Session 2 modifies data
-SELECT inventory_id, stock FROM film_inventory WHERE inventory_id = 2; -- Second Read: stock = 30 (Changed!)
-COMMIT;
-
--- [SESSION 2 - Writer (Run during Session 1's SLEEP)]
-USE sakila_sim;
-START TRANSACTION;
-UPDATE film_inventory SET stock = 30 WHERE inventory_id = 2;
-COMMIT;
-
-
--- 3. EXPERIMENT: PHANTOM READ (READ COMMITTED)
-
--- [SESSION 1 - Reader]
-USE sakila_sim;
-SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
-START TRANSACTION;
-SELECT COUNT(*) AS initial_count FROM film_inventory WHERE store_id = 1; -- Initial count: 3
-DO SLEEP(5); -- Pause while Session 2 inserts new tuple
-SELECT COUNT(*) AS phantom_count FROM film_inventory WHERE store_id = 1; -- New count: 4 (Phantom appeared!)
-COMMIT;
-
--- [SESSION 2 - Writer (Run during Session 1's SLEEP)]
-USE sakila_sim;
-START TRANSACTION;
-INSERT INTO film_inventory (inventory_id, film_id, store_id, stock, status) 
-VALUES (100, 199, 1, 15, 'available');
-COMMIT;
-
-
--- 4. EXPERIMENT: LOCKING RESOLUTIONS
-
--- Prevention of Non-Repeatable Read via Shared Row Lock (FOR SHARE)
--- [Session 1]
-USE sakila_sim;
-SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
-START TRANSACTION;
-SELECT stock FROM film_inventory WHERE inventory_id = 2 FOR SHARE; -- Acquires Shared (S) Lock
+SELECT stock FROM film_inventory WHERE inventory_id = 2;
 DO SLEEP(5);
 SELECT stock FROM film_inventory WHERE inventory_id = 2;
 COMMIT;
 
--- [Session 2 (Run concurrently)]
--- The following UPDATE will be BLOCKED until Session 1 completes, preserving consistency:
-USE sakila_sim;
-UPDATE film_inventory SET stock = 40 WHERE inventory_id = 2;
+-- Session 2 (Writer):
+START TRANSACTION;
+UPDATE film_inventory SET stock = stock + 10 WHERE inventory_id = 2;
+COMMIT;
+
+
+-- [ANOMALY 3: PHANTOM READ TEMPLATE]
+-- Session 1 (Reader):
+SET SESSION TRANSACTION ISOLATION LEVEL <LEVEL>;
+START TRANSACTION;
+SELECT COUNT(*) FROM film_inventory WHERE store_id = 1;
+DO SLEEP(5);
+SELECT COUNT(*) FROM film_inventory WHERE store_id = 1;
+UPDATE film_inventory SET status = 'audited' WHERE store_id = 1;
+SELECT COUNT(*) FROM film_inventory WHERE status = 'audited';
+COMMIT;
+
+-- Session 2 (Writer):
+START TRANSACTION;
+INSERT INTO film_inventory VALUES (100, 199, 1, 15, 'available');
+COMMIT;
+
+
+-- ============================================================================
+-- PART 2: 4 LOCK EXPERIMENTS (1 PER ISOLATION LEVEL)
+-- ============================================================================
+
+-- LOCK 1 [READ UNCOMMITTED]: Explicit Table Lock prevents Dirty Read
+-- Session 1 (Writer):
+LOCK TABLES film_inventory WRITE;
+UPDATE film_inventory SET stock = 5 WHERE inventory_id = 1;
+DO SLEEP(5);
+UNLOCK TABLES;
+
+-- Session 2 (Reader):
+SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+SELECT stock FROM film_inventory WHERE inventory_id = 1;
+
+
+-- LOCK 2 [READ COMMITTED]: Shared Row Lock (FOR SHARE) prevents Non-Repeatable Read
+-- Session 1 (Reader):
+SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
+START TRANSACTION;
+SELECT stock FROM film_inventory WHERE inventory_id = 2 FOR SHARE;
+DO SLEEP(5);
+SELECT stock FROM film_inventory WHERE inventory_id = 2;
+COMMIT;
+
+-- Session 2 (Writer):
+UPDATE film_inventory SET stock = stock + 10 WHERE inventory_id = 2;
+
+
+-- LOCK 3 [REPEATABLE READ]: Exclusive Range Lock (FOR UPDATE) blocks Phantom Insert
+-- Session 1 (Reader):
+SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+START TRANSACTION;
+SELECT * FROM film_inventory WHERE store_id = 1 FOR UPDATE;
+DO SLEEP(5);
+COMMIT;
+
+-- Session 2 (Writer):
+INSERT INTO film_inventory VALUES (102, 199, 1, 15, 'available');
+
+
+-- LOCK 4 [SERIALIZABLE]: Automatic Shared Locks & Deadlock/Timeout Trade-off
+-- Session 1 (Reader):
+SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+START TRANSACTION;
+SELECT * FROM film_inventory WHERE store_id = 1;
+DO SLEEP(5);
+COMMIT;
+
+-- Session 2 (Writer):
+INSERT INTO film_inventory VALUES (103, 199, 1, 15, 'available');
